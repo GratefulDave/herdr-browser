@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Install the desktop helper without replacing foreign or edited files."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parent.parent
+HOME = Path.home()
+APP = Path(os.environ.get("HERDR_APP_HOME", HOME / ".config/herdr-app")).expanduser().absolute()
+BIN = HOME / ".local/bin/herdr-browser"
+SHARE = HOME / ".local/share/herdr-browser"
+MOD = APP / "mods/herdr-browser"
+SKILL = HOME / ".omp/agent/skills/herdr-browser/SKILL.md"
+MANIFEST = SHARE / "installed.json"
+PROGRAMS = APP / "programs.json"
+KEYS = APP / "keys.json"
+
+
+def fail(message):
+    raise SystemExit(message)
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_file(path):
+    if path.is_symlink():
+        fail(f"Conflict (symlink): {path}")
+    if not path.exists():
+        return None
+    if not path.is_file():
+        fail(f"Conflict (not a regular file): {path}")
+    return path.read_bytes()
+
+
+def object_file(path):
+    raw = read_file(path)
+    if raw is None:
+        return raw, {}
+    try:
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError("expected an object")
+        return raw, value
+    except (ValueError, UnicodeError) as e:
+        fail(f"Invalid JSON in {path}: {e}")
+
+
+def check_parent(path):
+    parent = path.parent
+    while not parent.exists():
+        if parent.is_symlink():
+            fail(f"Conflict (dangling symlink): {parent}")
+        parent = parent.parent
+    if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
+        fail(f"Destination is not writable: {parent}")
+    # Allow system ancestors such as macOS's /tmp and the selected roots.
+    p = path.parent
+    while p not in (HOME, APP, p.parent):
+        if p.is_symlink():
+            fail(f"Conflict (symlink): {p}")
+        p = p.parent
+
+
+def atomic(path, data, mode=0o644, expected=None):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if read_file(path) != expected:
+        fail(f"Destination changed during installation: {path}")
+    fd, name = tempfile.mkstemp(prefix=".herdr-browser-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(name, mode)
+        if read_file(path) != expected:
+            fail(f"Destination changed during installation: {path}")
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def main():
+    print("Permissions: local commands via hc and herdr-app; browser network access and downloads; project-owned state and files.")
+    for command in ("cargo", "hc", "herdr-app"):
+        if not shutil.which(command):
+            fail(f"Required command not found: {command}")
+    for src in (ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "LICENSE", ROOT / "extension/manifest.json", ROOT / "extension/recorder.js", ROOT / "skills/herdr-browser/SKILL.md", ROOT / "mods/herdr-browser/main.js", ROOT / "mods/herdr-browser/mod.json", ROOT / "mods/herdr-browser/icon.svg"):
+        if not src.is_file():
+            fail(f"Missing project file: {src}")
+    manifest_raw, manifest = object_file(MANIFEST)
+    if manifest and (manifest.get("version") != 1 or not isinstance(manifest.get("files"), dict)):
+        fail(f"Invalid installation manifest: {MANIFEST}")
+    old = manifest.get("files", {})
+    programs_raw, programs = object_file(PROGRAMS)
+    keys_raw, keys = object_file(KEYS)
+    entries = programs.setdefault("programs", {})
+    if not isinstance(entries, dict):
+        fail(f"Invalid programs object: {PROGRAMS}")
+    program = {"name": "Browser", "icon": "mods/herdr-browser/icon.svg", "run": [str(BIN), "view", "--standalone"]}
+    if "herdr-browser" in entries and entries["herdr-browser"] != program:
+        fail(f"Conflicting programs.herdr-browser: {PROGRAMS}")
+    entries["herdr-browser"] = program
+    for section, bindings in keys.items():
+        if not isinstance(bindings, dict):
+            fail(f"Invalid key section {section}: {KEYS}")
+    global_keys = keys.setdefault("global", {})
+    action = "mod.open:herdr-browser"
+    existing = [(section, key) for section, bindings in keys.items()
+                for key, value in bindings.items() if value == action]
+    if existing:
+        section, shortcut = existing[0]
+        print(f"Browser shortcut already bound: {section} {shortcut}.")
+    else:
+        shortcut = next((key for key in ("cmd-shift-b", "cmd-alt-b")
+                         if all(key not in bindings for bindings in keys.values())), None)
+        if shortcut is None:
+            print("Browser shortcuts are claimed; use herdr-app do mod.open --name herdr-browser.")
+        else:
+            global_keys[shortcut] = action
+            print(f"Browser shortcut: {shortcut}.")
+    browser_keys = keys.setdefault("mod:herdr-browser", {})
+    for key, command in (
+        ("cmd-enter", "herdr-browser.open"),
+        ("cmd-shift-enter", "herdr-browser.show"),
+        ("cmd-alt-s", "herdr-browser.selection"),
+        ("cmd-alt-x", "herdr-browser.screenshot"),
+    ):
+        if key in browser_keys and browser_keys[key] != command:
+            print(f"Shortcut conflict: {KEYS} mod:herdr-browser {key} is {browser_keys[key]!r}; {command} not installed.")
+        else:
+            browser_keys[key] = command
+    sources = {
+        SHARE / "LICENSE": ROOT / "LICENSE",
+        MOD / "LICENSE": ROOT / "LICENSE",
+        SHARE / "extension/manifest.json": ROOT / "extension/manifest.json",
+        SHARE / "extension/recorder.js": ROOT / "extension/recorder.js",
+        SKILL: ROOT / "skills/herdr-browser/SKILL.md",
+        MOD / "main.js": ROOT / "mods/herdr-browser/main.js",
+        MOD / "mod.json": ROOT / "mods/herdr-browser/mod.json",
+        MOD / "icon.svg": ROOT / "mods/herdr-browser/icon.svg",
+    }
+    staged = {dest: src.read_bytes() for dest, src in sources.items()}
+    snapshots = {}
+    for dest in [*staged, BIN, MANIFEST, PROGRAMS, KEYS]:
+        check_parent(dest)
+        snapshots[dest] = read_file(dest)
+    for dest in [*staged, BIN]:
+        existing = snapshots[dest]
+        if existing is not None and digest(existing) != old.get(str(dest)) and (dest not in staged or existing != staged[dest]):
+            fail(f"Conflicting or edited file: {dest}")
+    # The manifest is owned only when it has the expected schema.
+    if manifest_raw is not None and not manifest:
+        fail(f"Conflicting installation manifest: {MANIFEST}")
+    with tempfile.TemporaryDirectory(prefix="herdr-browser-install-") as tmp:
+        tmp = Path(tmp)
+        check_mod = tmp / "mod"
+        check_mod.mkdir()
+        for dest in (MOD / "main.js", MOD / "mod.json", MOD / "icon.svg"):
+            (check_mod / dest.name).write_bytes(staged[dest])
+        subprocess.run(["herdr-app", "check", str(check_mod)], check=True)
+        build = subprocess.run(["cargo", "build", "--release", "--locked", "--message-format=json"], cwd=ROOT, stdout=subprocess.PIPE, check=True)
+        executables = []
+        for line in build.stdout.splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            target = item.get("target", {})
+            if item.get("reason") == "compiler-artifact" and target.get("name") == "herdr-browser" and "bin" in target.get("kind", []) and item.get("executable"):
+                executables.append(Path(item["executable"]))
+        if len(executables) != 1:
+            fail("Cargo did not report exactly one herdr-browser executable")
+        staged[BIN] = executables[0].read_bytes()
+        for dest, data in staged.items():
+            current = snapshots[dest]
+            if current is not None and digest(current) != old.get(str(dest)) and current != data:
+                fail(f"Conflicting or edited file: {dest}")
+        # Recheck all destinations before the first persistent write.
+        for dest, expected in snapshots.items():
+            if read_file(dest) != expected:
+                fail(f"Destination changed during installation: {dest}")
+        for dest, data in staged.items():
+            mode = 0o755 if dest == BIN else 0o644
+            if snapshots[dest] != data or (dest == BIN and not os.access(dest, os.X_OK)):
+                atomic(dest, data, mode, snapshots[dest])
+        for dest, obj, original in ((PROGRAMS, programs, programs_raw), (KEYS, keys, keys_raw)):
+            data = (json.dumps(obj, indent=2, ensure_ascii=False) + "\n").encode()
+            if original is None or json.loads(original) != obj:
+                atomic(dest, data, expected=original)
+        record = {"version": 1, "files": {str(dest): digest(data) for dest, data in staged.items()}}
+        updated = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode()
+        if updated != manifest_raw:
+            atomic(MANIFEST, updated, expected=manifest_raw)
+    print(f"Installed {BIN}. Run {BIN} install-browser to provision Chrome for Testing.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, subprocess.CalledProcessError) as e:
+        fail(str(e))

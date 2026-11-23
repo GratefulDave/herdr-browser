@@ -1,0 +1,11 @@
+{
+  "global": {
+    "cmd-alt-b": "mod.open:herdr-browser"
+  },
+  "mod:herdr-browser": {
+    "cmd-enter": "herdr-browser.open",
+    "cmd-shift-enter": "herdr-browser.show",
+    "cmd-alt-s": "herdr-browser.selection",
+    "cmd-alt-x": "herdr-browser.screenshot"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "herdr-browser diagnostics recorder",
+  "version": "0.1.0",
+  "description": "Record console output and network requests for the dedicated browser.",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["recorder.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
