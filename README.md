@@ -43,6 +43,8 @@ For a named profile, put `--profile work` before the command on every invocation
 
 Open the Browser panel from a **local** space using the command palette's **Browser** entry, the installed Control–Command–B shortcut (`cmd-ctrl-b`), or `herdr-app do mod.open --name herdr-browser`. Custom Browser bindings are preserved. The installer removes the exact former global Browser defaults `cmd-shift-y` and `cmd-alt-b` only when it installs the new shortcut or another Browser binding exists. If the new key is occupied and no custom Browser binding exists, the existing configuration is preserved; use the palette or command. Remote spaces must switch to a local space; remote localhost is never opened locally.
 
+Use ↑/↓ to move through the panel controls, ← to return to the current page's sidebar row, and Enter to activate a control; Enter in an edited field returns to the menu.
+
 1. On **Browser**, select **Default** or a listed Herdr profile, or type a new name using 1–64 lowercase letters, digits, hyphens or underscores. The selection is remembered. The editable start URL is prefilled with `https://www.google.com`.
 2. Choose **Sign in & open tab** to launch a dedicated manual Chrome for Testing window with the selected profile and URL. Sign in yourself, then quit Chrome; the native browser tab connects with that profile and URL. For a profile already signed in, choose **Open in tab** instead.
 3. Under **Chrome settings**, install Chrome for Testing if it is missing; installation runs in a separate terminal tab. If the selected profile is already running before manual sign-in, choose **Stop Chrome for this profile** there.
