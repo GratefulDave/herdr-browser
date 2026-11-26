@@ -1,4 +1,4 @@
-//! Exact local herdr-core ownership and desktop split placement.
+//! Exact local herdr-core ownership and desktop tab placement.
 
 use crate::{R, state};
 use serde_json::Value;
@@ -94,94 +94,54 @@ pub fn send(id: &str, message: &str) -> R<()> {
     Ok(())
 }
 
-struct Placement {
-    tab: String,
-    pane: String,
-}
-
-/// Only unambiguous, locally displayed terminals are eligible for a split.
-fn placement(ls: &Value, terminal: &str) -> R<Option<Placement>> {
+/// Find the local space containing exactly one instance of the owner.
+fn placement(ls: &Value, terminal: &str) -> R<Option<String>> {
     let spaces = ls["spaces"].as_array().ok_or("herdr-app ls returned no spaces")?;
     let mut matches = Vec::new();
     for space in spaces {
-        if !space["machine"].is_null() {
-            continue;
-        }
+        if !space["machine"].is_null() { continue; }
         for tab in space["tabs"].as_array().into_iter().flatten() {
             for item in tab["terminals"].as_array().into_iter().flatten() {
                 if item["terminal"].as_str() == Some(terminal) {
-                    let tab_id = tab["id"].as_str().filter(|s| !s.is_empty()).ok_or("desktop placement has no tab id")?;
-                    let pane = item["pane"].as_str().filter(|s| !s.is_empty()).ok_or("desktop placement has no pane id")?;
-                    matches.push(Placement { tab: tab_id.into(), pane: pane.into() });
+                    matches.push(space["id"].as_str().filter(|s| !s.is_empty()).ok_or("desktop placement has no space id")?.to_owned());
                 }
             }
         }
     }
     match matches.len() {
         0 => Ok(None),
-        1 => Ok(Some(matches.remove(0))),
+        1 => Ok(matches.pop()),
         _ => Err(format!("terminal {terminal} has ambiguous desktop placement").into()),
     }
 }
 
-/// Open or reuse the exact recorded split, serialized per owner.
+/// Open or refocus the recorded native tab, serialized per owner and profile.
 pub fn show(id: &str) -> R<()> {
     let _guard = state::lock_named(&format!("show-{id}"))?;
     terminal(id)?;
     let ls = run("herdr-app", &["ls"]).map_err(|e| format!("desktop display unavailable: {e}"))?;
-    let owner_place = placement(&ls, id)?.ok_or_else(|| format!("owner {id} has no visible local desktop pane"))?;
-    let exe = std::fs::canonicalize(std::env::current_exe()?)?;
-    let exe = exe.to_str().ok_or("helper path is not UTF-8")?;
-    let mut argv = vec![exe, "--owner", id];
-    if let Some(profile) = state::selected_profile() {
-        argv.extend(["--profile", profile]);
-    }
-    argv.push("view");
-
+    let space = placement(&ls, id)?.ok_or_else(|| format!("owner {id} has no visible local desktop pane"))?;
     if let Some(view) = state::load()?.views.get(id).cloned() {
-        if let Some(place) = placement(&ls, &view.terminal)? {
-            if place.tab == owner_place.tab && place.pane == view.pane {
-                let current = match run("hc", &["get", &view.terminal, "--json"]) {
-                    Ok(value) => Some(value),
-                    Err(e) if e.downcast_ref::<TerminalNotFound>().is_some() => None,
-                    Err(e) => return Err(e),
-                };
-                if let Some(current) = current {
-                    if current["address"].as_str() != Some(view.terminal.as_str()) {
-                        return Err("hc returned a different recorded view address".into());
-                    }
-                    match current["state"].as_str() {
-                        Some("live") => {
-                            let actual = current["argv"].as_array().ok_or("hc returned no recorded view argv")?;
-                            if actual.len() == argv.len() && actual.iter().zip(&argv).all(|(v, expected)| v.as_str() == Some(*expected)) {
-                                return Ok(());
-                            }
-                        }
-                        Some("finished") => {}
-                        _ => return Err("hc returned invalid recorded view state".into()),
-                    }
+        if view.space == space && !view.tab.is_empty() {
+            if run("herdr-app", &["do", "tab.select", "--id", &view.tab]).is_ok() {
+                let status = run("herdr-app", &["status"])?;
+                if status["tab"].as_str() == Some(view.tab.as_str()) && status["space"].as_str() == Some(space.as_str()) {
+                    return Ok(());
                 }
             }
         }
         state::update(|s| s.views.remove(id))?;
     }
-
-    let encoded = serde_json::to_string(&argv)?;
-    let result = run("herdr-app", &["do", "pane.split", "--direction", "right", "--pane", &owner_place.pane, "--argv", &encoded])
+    let mut props = serde_json::json!({"owner": id});
+    if let Some(profile) = state::selected_profile() {
+        props["profile"] = serde_json::json!(profile);
+    }
+    let props = serde_json::to_string(&props)?;
+    let result = run("herdr-app", &["do", "tab.new", "--name", "Browser", "--space", &space, "--mod", "herdr-browser-tab", "--props", &props])
         .map_err(|e| format!("desktop display failed: {e}"))?;
-    let view_terminal = result["terminal"].as_str().filter(|s| local_id(s)).ok_or("pane.split returned no concrete local terminal")?;
-    let view_pane = if let Some(pane) = result["pane"].as_str().filter(|s| !s.is_empty()) {
-        pane.to_owned()
-    } else {
-        let updated = run("herdr-app", &["ls"])?;
-        let place = placement(&updated, view_terminal)?.ok_or("pane.split returned no pane and its terminal is not displayed")?;
-        if place.tab != owner_place.tab {
-            return Err("pane.split returned a terminal outside the owner's tab".into());
-        }
-        place.pane
-    };
+    let tab = result["tab"].as_str().or_else(|| result["id"].as_str()).filter(|s| !s.is_empty()).ok_or("tab.new returned no tab id")?;
     state::update(|s| {
-        s.views.insert(id.to_owned(), state::ViewRecord { pane: view_pane.to_owned(), terminal: view_terminal.to_owned() });
+        s.views.insert(id.to_owned(), state::ViewRecord { tab: tab.to_owned(), space });
     })?;
     Ok(())
 }

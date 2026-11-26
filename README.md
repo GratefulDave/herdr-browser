@@ -1,23 +1,21 @@
 # Herdr Browser
 
-A live browser split for Herdr Desktop (`herdr-app`) and herdr-core (`hc`). Each agent terminal has its own page. It works headlessly without the desktop open and does not use the separate Herdr TUI.
+A native browser tab and agent-owned browser view for Herdr Desktop (`herdr-app`) and herdr-core (`hc`). Each agent terminal has its own page. It works headlessly without the desktop open and does not use the separate Herdr TUI.
 
-Built from [Matt Coles’s original terminal browser, `herdr-web-browser`](https://github.com/MattJColes/herdr-web-browser). This adaptation uses Herdr Desktop and `hc`.
-
-[Build recipe](RECIPE.md) · [Preview](preview.png) · [Optional key bindings](keys.json)
+[Build recipe](RECIPE.md) · [Native browser preview](preview.png) · [Optional key bindings](keys.json)
 
 ## Install locally
 
-The installer needs Rust/Cargo, Python 3, `hc`, and `herdr-app`; downloading Chrome for Testing also needs `curl` and `unzip`. The mod runs the installed local helper. The helper can launch dedicated Chrome, access the network, and write profiles, downloads, and screenshots. It does not use your everyday browser profile or keychain. The installer preserves unrelated entries, occupied shortcuts, and locally edited installed files. No layout is installed.
+The installer needs Rust/Cargo, Python 3, `hc`, and `herdr-app`. The desktop mods can run the installed local helper. The helper can launch a dedicated Chrome, access the network, and write its profile, downloaded browser and screenshot files under project-owned paths. It does not use your everyday browser profile or keychain. The installer validates and installs both mods, removes only the exact obsolete stock terminal launcher, and preserves custom program entries, unrelated shortcuts and locally edited installed files.
 
 ```sh
 ./scripts/install
 ~/.local/bin/herdr-browser install-browser
 ```
 
-Add `~/.local/bin` to `PATH` if needed. The Herdr Desktop mod is `herdr-browser`; the OMP skill is `skill://herdr-browser`. The browser profile lives under `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-browser/profile`. The `console` and `network` recorder runs in the page's main world on HTTP(S) pages and is not a tamper-proof audit log.
+Add `~/.local/bin` to `PATH` if needed. The overlay mod is `herdr-browser`, the native tab mod is `herdr-browser-tab`, and the OMP skill is `skill://herdr-browser`. The browser profile lives under `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-browser/profile`. The `console` and `network` recorder runs in the page's main world on HTTP(S) pages and is not a tamper-proof audit log.
 
-The default installer pins Chrome for Testing `155.0.8059.39`, the build verified end to end on macOS. `158.0.8127.36` was not compatible in that test. Use this build for trusted previews.
+The installer pins Chrome for Testing `155.0.8059.39`. `158.0.8127.36` timed out before issuing requests on the tested Mac; `155.0.8059.39` passed the end-to-end browser test. Use this build for trusted previews and retest a current Chrome build before publishing.
 
 ## Use from an agent terminal
 
@@ -39,45 +37,32 @@ herdr-browser send selection
 herdr-browser send screenshot
 ```
 
-For a named profile, put `--profile work` before the command on every invocation, for example `herdr-browser --profile work send screenshot`. Refusals are not deliveries. `herdr-browser stop` closes the dedicated Chrome for the selected profile; owned views reconnect after an explicit `open`, while standalone views must be reopened.
+For a named profile, put `--profile work` before the command on every invocation, for example `herdr-browser --profile work send screenshot`. Refusals are not deliveries. `herdr-browser stop` closes the dedicated Chrome for the selected profile; an owned view can reconnect after an explicit `open`, while a standalone view's **Reconnect** starts a new target.
 
 ## Browser panel
 
-Open the Browser panel from a **local** space with the installed shortcut (Cmd–Shift–B, or Cmd–Option–B if the primary shortcut was occupied and the fallback was free), or run `herdr-app do mod.open --name herdr-browser`. If both shortcuts were occupied, the named command remains available. Remote spaces must switch to a local space; remote localhost is never opened locally.
+Open the Browser panel from a **local** space using the command palette's **Browser** entry, the installed Control–Command–B shortcut (`cmd-ctrl-b`), or `herdr-app do mod.open --name herdr-browser`. Custom Browser bindings are preserved. The installer removes the exact former global Browser defaults `cmd-shift-y` and `cmd-alt-b` only when it installs the new shortcut or another Browser binding exists. If the new key is occupied and no custom Browser binding exists, the existing configuration is preserved; use the palette or command. Remote spaces must switch to a local space; remote localhost is never opened locally.
 
 1. On **Browser**, select **Default** or a listed Herdr profile, or type a new name using 1–64 lowercase letters, digits, hyphens or underscores. The selection is remembered. The editable start URL is prefilled with `https://www.google.com`.
-2. From a local terminal pane, choose **Sign in & open pane** to split a standalone browser pane to its right and launch a dedicated manual Chrome for Testing window with the selected profile and URL. Sign in yourself, then close Chrome; the browser pane starts with that same profile and URL. For a profile already signed in, choose **Open in pane** instead.
-3. Under **Chrome settings**, install Chrome for Testing if it is missing; installation runs in a separate terminal tab. If the selected profile is already running before manual sign-in, choose **Stop Chrome for this profile** there. The settings page identifies the selected profile; nothing is stopped automatically.
+2. Choose **Sign in & open tab** to launch a dedicated manual Chrome for Testing window with the selected profile and URL. Sign in yourself, then quit Chrome; the native browser tab connects with that profile and URL. For a profile already signed in, choose **Open in tab** instead.
+3. Under **Chrome settings**, install Chrome for Testing if it is missing; installation runs in a separate terminal tab. If the selected profile is already running before manual sign-in, choose **Stop Chrome for this profile** there.
 
-The panel requests a native right-hand pane split without creating or changing layouts. Its standalone pane is independent of any agent and cannot send to one. Use the agent shortcuts below or the commands above for an agent-owned browser and sends. Check the browser pane for startup or sign-in errors. Click **Close pane** or press Ctrl-Q in the browser view to close it; neither stops the agent, and stopping Chrome is not needed to close the pane.
+The standalone tab needs no terminal pane and has no agent recipient. Use the agent shortcuts below or commands above for an agent-owned browser and sends. Closing a browser tab does not stop Chrome or the agent.
 
-When Browser is opened from a uniquely displayed local agent, its **Browser** page supports these default overlay-scoped shortcuts: **Cmd–Enter** opens the entered URL beside that agent (an empty URL shows the existing view); **Cmd–Shift–Enter** shows or reuses its view without navigation; **Cmd–Option–S** sends the selection; **Cmd–Option–X** sends a screenshot. They use the selected profile and original agent; sends keep the dialog open. The installer leaves occupied `mod:herdr-browser` keys intact and reports each conflict; it does not change global shortcuts for these actions. While the overlay is open on the Browser page, the named commands are also available, for example `herdr-app do herdr-browser.show`. In the owned browser pane, **Ctrl-S** sends the selection and **Ctrl-X** sends a screenshot.
+When Browser is opened from a uniquely displayed local agent, its **Browser** page supports these default overlay-scoped shortcuts: **Cmd–Enter** opens the entered URL beside that agent (an empty URL shows the existing view); **Cmd–Shift–Enter** shows or reuses its view without navigation; **Cmd–Option–S** sends the selection; **Cmd–Option–X** sends a screenshot. They use the selected profile and original agent; sends keep the dialog open. The installer leaves occupied `mod:herdr-browser` keys intact and reports each conflict. The named commands are also available while the overlay is open on the Browser page, for example `herdr-app do herdr-browser.show`. In the terminal owned view, **Ctrl-S** sends the selection and **Ctrl-X** sends a screenshot.
 
-In the live view, click the address bar (or press Ctrl-L), type or paste an address, then press Enter. The toolbar has Back, Forward and Reload (Ctrl-B, Ctrl-F and Ctrl-R). Existing Herdr shortcuts keep their app-level bindings.
+The native tab displays the page in its viewport. Use the address bar or Ctrl/Cmd-L, and Ctrl/Cmd-R to reload; the toolbar arrows navigate back and forward. Its native tab strip manages browser tabs inside the view, independently of Herdr's tab strip. Existing Herdr shortcuts retain their app-level bindings.
 
-| Browser control | What it does |
-| --- | --- |
-| **− / % / +** (F5 / F7 / F6) | Zooms the page out, resets to 100%, or zooms in without resizing Herdr. |
-| **Find** (F2) | Enter searches visible text on the main page. F3 and F4 move to the next and previous match; Esc closes Find. |
-| **+ Tab / Next / Close** (F8 / F9 / F10) | Manages browser tabs within this view, not Herdr tabs. Owned CLI commands use the selected tab of that owner. |
-| **Bookmark** (F11) | Saves or removes the current HTTP(S) page. Open a site before bookmarking; blank and internal pages are not saved. When editing an address, Up/Down chooses a history or bookmark suggestion and Enter opens it. |
-| **Search** | Sets the profile’s HTTPS search URL with one `{query}` placeholder. Text that is not an address goes to this search engine. |
-| **Files** (F12) | Shows download progress and file activity. **Download folder** changes the destination for the running profile. Click a page’s file input to select a file with the macOS picker. |
-
-Herdr Desktop can intercept Cmd–Plus, Cmd–Minus, Cmd–0, and Cmd–F before a terminal sees them. Use the toolbar or function keys for page actions; the installer does not change those Herdr bindings.
-
-New browser panes and browser tabs open [Google](https://www.google.com) unless an explicit start URL is provided. Opening an existing owned browser pane leaves its page unchanged. **+ → Browser** opens a standalone view using the default profile and has no agent recipient.
-
+The terminal view, launched with `herdr-browser view --standalone`, has additional Find, Files, zoom, bookmarks and search controls and function-key shortcuts. These advanced controls are not part of the native tab UI. Its **Files** control shows downloads and opens a native file picker for page uploads.
 ## Sign in and reuse a profile
-
+New standalone views and browser tabs open [Google](https://www.google.com) unless an explicit start URL is provided. Opening an existing owned browser view leaves its page unchanged.
 ```sh
 herdr-browser --profile work login https://app.example.com
 # Finish sign-in yourself, then quit that Chrome for Testing session.
 herdr-browser --profile work open https://app.example.com --show
 ```
 
-Use the same `--profile work` on later commands. `stop` and `status` apply to the selected profile only; stop it before opening its sign-in window. Named profiles retain their own cookies and storage across stops. Without `--profile`, including in **+ → Browser**, the helper uses the default profile. It never imports your everyday browser's cookies or keychain. An agent authorized to use a signed-in profile can see the sessions in it.
-
+Use the same `--profile work` on later commands. `stop` and `status` apply to the selected profile only; stop it before opening its sign-in window. Named profiles retain their own cookies and storage across stops. Without `--profile`, the helper uses the default profile. It never imports your everyday browser's cookies or keychain. An agent authorized to use a signed-in profile can see the sessions in it.
 Same-tab HTTP redirects work normally. A sign-in popup with a known opener stays in that owner's view; closing the popup returns to its opener. The manual sign-in window has no DevTools listener or diagnostics recorder. It does not override a provider's browser policy.
 
 ## Credits

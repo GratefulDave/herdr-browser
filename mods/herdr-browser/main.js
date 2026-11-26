@@ -26,10 +26,6 @@ function localPanes() {
 }
 
 
-async function desktopCommand(command, args) {
-  const result = await exec("/usr/bin/env", [`HERDR_APP_HOME=${appHome()}`, "herdr-app", "do", command, JSON.stringify(args)]);
-  if (result.code !== 0) throw new Error(result.stderr.trim() || result.stdout.trim() || `${command} failed (${result.code}).`);
-}
 
 export default class Browser extends View {
   init(_props, cx) {
@@ -138,37 +134,21 @@ export default class Browser extends View {
   }
 
 
-  openPane(signIn, cx) {
+  openTab(signIn, cx) {
     if (this.busy || !this.ready()) { cx.notify(); return; }
-    if (!this.launchPane || !this.launchTerminal || localPanes().filter((p) => p.pane === this.launchPane && p.terminal === this.launchTerminal).length !== 1) {
-      this.error = "Open Browser from a uniquely displayed local terminal pane.";
-      cx.notify();
-      return;
-    }
-    const pane = this.launchPane;
-    const profileArgs = this.profileArgs();
+    const space = spaces().find((s) => s.active).id;
+    const profile = this.profile;
     const url = this.urlInput.value().trim();
-    this.busy = true;
-    this.error = "";
-    this.message = "";
-    cx.notify();
-    cx.spawn(async (cx) => {
-      try {
-        await desktopCommand("pane.split", {
-          direction: "right",
-          pane,
-          argv: [BIN, ...profileArgs, "view", "--standalone", ...(signIn ? ["--sign-in"] : []), ...(url ? ["--url", url] : [])],
-        });
-        setShared(PROFILE_KEY, this.profile || null);
-        this.busy = false;
-        closeOverlay(props().overlay);
-        return;
-      } catch (error) {
-        this.error = String(error);
-      }
-      this.busy = false;
-      cx.notify();
-    });
+    try {
+      run("tab.new", {
+        name: "Browser",
+        space,
+        mod: "herdr-browser-tab",
+        props: { ...(profile ? { profile } : {}), ...(url ? { url } : {}), ...(signIn ? { signIn: true } : {}) },
+      });
+      setShared(PROFILE_KEY, profile || null);
+      closeOverlay(props().overlay);
+    } catch (error) { this.error = String(error); cx.notify(); }
   }
   tab(cx) {
     if (this.busy || !this.ready()) { cx.notify(); return; }
@@ -255,17 +235,17 @@ export default class Browser extends View {
             this.profileChip(t, `hb-profile-${p}`, this.profile === p ? `✓ ${p}` : p, this.profile === p, (_e, cx) => this.chooseProfile(p, cx))))))))
       .child(v_flex().gap(4)
         .child(div().font_semibold().child("2. Start the browser"))
-        .child(this.button(t, "hb-login", "Sign in & open pane", true, (_e, cx) => this.openPane(true, cx)))
-        .child(div().text_color(t.muted).child("3. Finish signing in and quit Chrome for Testing, then open the pane."))
+        .child(this.button(t, "hb-login", "Sign in & open tab", true, (_e, cx) => this.openTab(true, cx)))
+        .child(div().text_color(t.muted).child("3. Finish signing in and quit Chrome for Testing; the tab then connects."))
         .child(div().text_color(t.muted).child("Already signed in?"))
-        .child(this.button(t, "hb-open-pane", "Open in pane", false, (_e, cx) => this.openPane(false, cx))))
+        .child(this.button(t, "hb-open-tab", "Open in tab", false, (_e, cx) => this.openTab(false, cx))))
       .child(this.commandHelp(t))
       )
       .when(this.section === "settings", (el) => el.child(v_flex().gap(8)
         .child(div().font_semibold().child("Chrome settings"))
         .child(div().text_color(t.muted).child(`Selected profile: ${this.profile || "Default"}. Change it on the Browser page.`))
         .child(this.button(t, "hb-install", "Install Chrome for Testing", false, (_e, cx) => this.tab(cx)))
-        .child(div().text_color(t.muted).child("Close pane (Ctrl-Q in the browser) exits the view, not Chrome. Stop shuts down Chrome for the selected profile."))
+        .child(div().text_color(t.muted).child("Closing a browser tab exits the view, not Chrome. Stop shuts down Chrome for the selected profile."))
         .child(this.button(t, "hb-stop", "Stop Chrome for this profile", false, (_e, cx) => this.stopChrome(cx)))))
       .when(this.busy, (el) => el.child(div().text_color(t.muted).child("Working…")))
       .when(Boolean(this.error), (el) => el.child(div().text_color(t.blocked).child(this.error)))

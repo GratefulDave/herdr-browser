@@ -15,6 +15,7 @@ APP = Path(os.environ.get("HERDR_APP_HOME", HOME / ".config/herdr-app")).expandu
 BIN = HOME / ".local/bin/herdr-browser"
 SHARE = HOME / ".local/share/herdr-browser"
 MOD = APP / "mods/herdr-browser"
+TAB_MOD = APP / "mods/herdr-browser-tab"
 SKILL = HOME / ".omp/agent/skills/herdr-browser/SKILL.md"
 MANIFEST = SHARE / "installed.json"
 PROGRAMS = APP / "programs.json"
@@ -92,7 +93,7 @@ def main():
     for command in ("cargo", "hc", "herdr-app"):
         if not shutil.which(command):
             fail(f"Required command not found: {command}")
-    for src in (ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "LICENSE", ROOT / "extension/manifest.json", ROOT / "extension/recorder.js", ROOT / "skills/herdr-browser/SKILL.md", ROOT / "mods/herdr-browser/main.js", ROOT / "mods/herdr-browser/mod.json", ROOT / "mods/herdr-browser/icon.svg"):
+    for src in (ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "LICENSE", ROOT / "extension/manifest.json", ROOT / "extension/recorder.js", ROOT / "skills/herdr-browser/SKILL.md", ROOT / "mods/herdr-browser/main.js", ROOT / "mods/herdr-browser/mod.json", ROOT / "mods/herdr-browser/icon.svg", ROOT / "mods/herdr-browser-tab/main.js", ROOT / "mods/herdr-browser-tab/mod.json"):
         if not src.is_file():
             fail(f"Missing project file: {src}")
     manifest_raw, manifest = object_file(MANIFEST)
@@ -101,31 +102,33 @@ def main():
     old = manifest.get("files", {})
     programs_raw, programs = object_file(PROGRAMS)
     keys_raw, keys = object_file(KEYS)
-    entries = programs.setdefault("programs", {})
+    entries = programs.get("programs", {})
     if not isinstance(entries, dict):
         fail(f"Invalid programs object: {PROGRAMS}")
     program = {"name": "Browser", "icon": "mods/herdr-browser/icon.svg", "run": [str(BIN), "view", "--standalone"]}
-    if "herdr-browser" in entries and entries["herdr-browser"] != program:
-        fail(f"Conflicting programs.herdr-browser: {PROGRAMS}")
-    entries["herdr-browser"] = program
+    if entries.get("herdr-browser") == program:
+        del entries["herdr-browser"]
     for section, bindings in keys.items():
         if not isinstance(bindings, dict):
             fail(f"Invalid key section {section}: {KEYS}")
     global_keys = keys.setdefault("global", {})
     action = "mod.open:herdr-browser"
+    legacy = ("cmd-shift-y", "cmd-alt-b")
     existing = [(section, key) for section, bindings in keys.items()
-                for key, value in bindings.items() if value == action]
+                for key, value in bindings.items()
+                if value == action and not (section == "global" and key in legacy)]
     if existing:
         section, shortcut = existing[0]
         print(f"Browser shortcut already bound: {section} {shortcut}.")
+    elif all("cmd-ctrl-b" not in bindings for bindings in keys.values()):
+        global_keys["cmd-ctrl-b"] = action
+        print("Browser shortcut: cmd-ctrl-b.")
     else:
-        shortcut = next((key for key in ("cmd-shift-b", "cmd-alt-b")
-                         if all(key not in bindings for bindings in keys.values())), None)
-        if shortcut is None:
-            print("Browser shortcuts are claimed; use herdr-app do mod.open --name herdr-browser.")
-        else:
-            global_keys[shortcut] = action
-            print(f"Browser shortcut: {shortcut}.")
+        print("Browser shortcut cmd-ctrl-b is claimed; use the Browser command palette entry or herdr-app do mod.open --name herdr-browser.")
+    if existing or global_keys.get("cmd-ctrl-b") == action:
+        for shortcut in legacy:
+            if global_keys.get(shortcut) == action:
+                del global_keys[shortcut]
     browser_keys = keys.setdefault("mod:herdr-browser", {})
     for key, command in (
         ("cmd-enter", "herdr-browser.open"),
@@ -146,6 +149,9 @@ def main():
         MOD / "main.js": ROOT / "mods/herdr-browser/main.js",
         MOD / "mod.json": ROOT / "mods/herdr-browser/mod.json",
         MOD / "icon.svg": ROOT / "mods/herdr-browser/icon.svg",
+        TAB_MOD / "LICENSE": ROOT / "LICENSE",
+        TAB_MOD / "main.js": ROOT / "mods/herdr-browser-tab/main.js",
+        TAB_MOD / "mod.json": ROOT / "mods/herdr-browser-tab/mod.json",
     }
     staged = {dest: src.read_bytes() for dest, src in sources.items()}
     snapshots = {}
@@ -161,11 +167,12 @@ def main():
         fail(f"Conflicting installation manifest: {MANIFEST}")
     with tempfile.TemporaryDirectory(prefix="herdr-browser-install-") as tmp:
         tmp = Path(tmp)
-        check_mod = tmp / "mod"
-        check_mod.mkdir()
-        for dest in (MOD / "main.js", MOD / "mod.json", MOD / "icon.svg"):
-            (check_mod / dest.name).write_bytes(staged[dest])
-        subprocess.run(["herdr-app", "check", str(check_mod)], check=True)
+        for mod, filenames in ((MOD, ("main.js", "mod.json", "icon.svg")), (TAB_MOD, ("main.js", "mod.json"))):
+            check_mod = tmp / mod.name
+            check_mod.mkdir()
+            for filename in filenames:
+                (check_mod / filename).write_bytes(staged[mod / filename])
+            subprocess.run(["herdr-app", "check", str(check_mod)], check=True)
         build = subprocess.run(["cargo", "build", "--release", "--locked", "--message-format=json"], cwd=ROOT, stdout=subprocess.PIPE, check=True)
         executables = []
         for line in build.stdout.splitlines():
@@ -193,7 +200,7 @@ def main():
                 atomic(dest, data, mode, snapshots[dest])
         for dest, obj, original in ((PROGRAMS, programs, programs_raw), (KEYS, keys, keys_raw)):
             data = (json.dumps(obj, indent=2, ensure_ascii=False) + "\n").encode()
-            if original is None or json.loads(original) != obj:
+            if (original is not None and json.loads(original) != obj) or (original is None and obj):
                 atomic(dest, data, expected=original)
         record = {"version": 1, "files": {str(dest): digest(data) for dest, data in staged.items()}}
         updated = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode()

@@ -8,6 +8,7 @@ mod cdp;
 mod chrome;
 mod debug;
 mod host;
+mod native;
 mod icons;
 mod page;
 mod page_tools;
@@ -45,11 +46,11 @@ enum Cmd {
     /// Navigate your owned page, creating it if absent.
     Open {
         url: String,
-        /// Also open or reuse a live split beside the owner.
+        /// Also open or reuse a live tab in the owner's space.
         #[arg(long)]
         show: bool,
     },
-    /// Open or reuse the live split beside the owner.
+    /// Open or reuse the live tab in the owner's space.
     Show,
     /// List interactive elements and their current numeric references.
     Snapshot,
@@ -111,6 +112,19 @@ enum Cmd {
         #[arg(long, requires = "standalone")]
         sign_in: bool,
     },
+    #[command(hide = true)]
+    NativeView {
+        #[arg(long)]
+        app_home: PathBuf,
+        #[arg(long, conflicts_with = "owner")]
+        standalone: bool,
+        #[arg(long, requires = "standalone")]
+        url: Option<String>,
+        #[arg(long, requires = "standalone")]
+        sign_in: bool,
+        #[arg(long, hide = true)]
+        child: bool,
+    },
 }
 
 fn print(json_out: bool, text: impl std::fmt::Display, value: Value) {
@@ -166,7 +180,7 @@ fn run(cli: Cli) -> R<()> {
         Cmd::Show => {
             let owner = host::owner(cli.owner.as_deref())?;
             host::show(&owner).map_err(|e| format!("display failed for {owner}: {e}"))?;
-            print(j, format_args!("view pane requested for {owner}; browser startup is not confirmed"), json!({"owner": owner, "displayed": true, "browser_startup_confirmed": false}));
+            print(j, format_args!("view tab requested for {owner}; browser startup is not confirmed"), json!({"owner": owner, "displayed": true, "browser_startup_confirmed": false}));
             return Ok(());
         }
         Cmd::View { standalone, url, sign_in } => {
@@ -180,6 +194,12 @@ fn run(cli: Cli) -> R<()> {
                 chrome::login(&config, Some(url.as_deref().unwrap_or(page::HOME_URL)))?;
             }
             return view::run(config, owner, url.as_deref());
+        }
+        Cmd::NativeView { app_home, standalone, url, sign_in, child } => {
+            let owner = if standalone { None } else {
+                Some(host::owner(Some(cli.owner.as_deref().ok_or("native-view requires --owner or --standalone")?))?)
+            };
+            return native::run(app_home, owner, url, sign_in, child);
         }
         command => owned(command, j, cli.owner.as_deref()),
     }
@@ -203,7 +223,7 @@ fn owned(command: Cmd, j: bool, explicit: Option<&str>) -> R<()> {
                 }
                 value["displayed"] = json!(true);
                 value["browser_startup_confirmed"] = json!(false);
-                print(j, format_args!("{label} (view pane requested for {owner}; browser startup is not confirmed)"), value);
+                print(j, format_args!("{label} (view tab requested for {owner}; browser startup is not confirmed)"), value);
             } else {
                 print(j, label, value);
             }
