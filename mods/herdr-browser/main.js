@@ -1,7 +1,7 @@
 // @ts-check
 // Adapted from Matt Coles' herdr-web-browser. See README.md for the pinned source and license.
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, Button } from "gpui-base";
+import { v_flex, h_flex, InputState, Input, Button, ScrollHandle } from "gpui-base";
 import { exec, focused, panes, spaces, agents, props, closeOverlay, home, appHome, theme, checking, shared, setShared, run, nextCommand, keys } from "herdr";
 
 const BIN = `${home()}/.local/bin/herdr-browser`;
@@ -41,6 +41,13 @@ export default class Browser extends View {
     this.profile = typeof saved === "string" && validProfile(saved) ? saved : "";
     this.profileInput = InputState.new({ value: this.profile, placeholder: "Default (or type a new profile name)" });
     this.urlInput = InputState.new({ value: "https://www.google.com", placeholder: "Start URL" });
+    this.selection = "hb-nav-browser";
+    this.bodyScroll = ScrollHandle.new();
+    this.profileScroll = ScrollHandle.new();
+    this.urlInput.on("submit", () => this.handle.focus());
+    this.profileInput.on("submit", () => this.handle.focus());
+    this.urlInput.on("focus", (_e, cx) => { this.selection = "hb-url"; cx.notify(); });
+    this.profileInput.on("focus", (_e, cx) => { this.selection = "hb-profile-input"; cx.notify(); });
     this.profileInput.on("change", (_e, cx) => {
       this.profile = this.profileInput.value();
       this.error = "";
@@ -179,6 +186,7 @@ export default class Browser extends View {
 
   row(t, id, label, fn) {
     return div().id(id).px(8).py(4).rounded(6).cursor_pointer()
+      .when(this.selection === id, (el) => el.bg(t.accent).text_color(t.accent_foreground))
       .hover((s) => s.bg(t.hover)).on_click(fn).child(label);
   }
 
@@ -186,6 +194,7 @@ export default class Browser extends View {
     return Button.new(id).self_start().items_center().px(12).py(7).rounded(6).border(1)
       .border_color(primary ? t.solid : t.foreground).bg(primary ? t.solid : t.background)
       .text_color(primary ? t.solid_foreground : t.foreground).font_semibold().cursor_pointer()
+      .when(this.selection === id, (el) => el.border_color(t.accent).bg(t.accent).text_color(t.accent_foreground))
       .hover((s) => primary ? s.bg(t.accent).border_color(t.accent).text_color(t.accent_foreground) : s.bg(t.hover))
       .on_click(fn).child(label);
   }
@@ -194,6 +203,7 @@ export default class Browser extends View {
     return div().id(id).px(8).py(4).rounded(6).border(1)
       .border_color(selected ? t.accent : t.input).bg(selected ? t.raised : t.surface)
       .when(selected, (el) => el.font_semibold())
+      .when(this.selection === id, (el) => el.border_color(t.accent).bg(t.accent).text_color(t.accent_foreground))
       .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(fn).child(label);
   }
 
@@ -212,48 +222,86 @@ export default class Browser extends View {
 
   render() {
     const t = theme();
-    const input = (state) => Input.new(state).h(30).px(8).items_center().rounded(6).border(1).border_color(t.input).bg(t.background).text_color(t.foreground);
-    const tints = [["browser", "Browser"], ["settings", "Chrome settings"]];
+    const controls = [];
+    const bodyChildren = [];
+    const add = (id, action, element, profileIndex = null) => {
+      controls.push({ id, action, bodyIndex: bodyChildren.length, profileIndex });
+      bodyChildren.push(element);
+    };
+    const navItems = [["browser", "Browser"], ["settings", "Chrome settings"]];
     const nav = v_flex().w(148).flex_none().gap(4).pr(12).border_r(1).border_color(t.border)
-      .children(tints.map(([id, label]) => this.row(t, `hb-nav-${id}`, label, (_e, cx) => {
-        this.section = id;
-        cx.notify();
-      }).when(this.section === id, (el) => el.bg(t.raised).font_semibold())));
-    const body = v_flex().id(`hb-body-${this.section}`).flex_1().min_w(0).h_full().overflow_y_scrollbar().pr(8).gap(8)
-      .when(spaces().find((s) => s.active)?.machine !== null, (el) => el.child(div().text_color(t.blocked).child("Switch to a local space to use Browser.")))
-      .when(this.section === "browser", (el) => el
-      .child(v_flex().gap(4)
-        .child(div().font_semibold().child("1. Choose a site and profile"))
-        .child(div().child("Site address"))
-        .child(input(this.urlInput))
-        .child(div().child("Profile"))
-        .child(input(this.profileInput))
-        .child(div().text_color(t.muted).child("Named profiles keep separate sessions; everyday Chrome logins are not imported."))
-        .child(div().text_color(t.muted).child(this.loading ? "Loading profiles…" : "Saved profiles:"))
-        .child(h_flex().gap(4).child(this.profileChip(t, "hb-default", this.profile === "" ? "✓ Default" : "Default", this.profile === "", (_e, cx) => this.chooseProfile("", cx)))
-          .child(div().id("hb-profiles").flex_1().overflow_x_scroll().child(h_flex().gap(4).children(this.profiles.map((p) =>
-            this.profileChip(t, `hb-profile-${p}`, this.profile === p ? `✓ ${p}` : p, this.profile === p, (_e, cx) => this.chooseProfile(p, cx))))))))
-      .child(v_flex().gap(4)
-        .child(div().font_semibold().child("2. Start the browser"))
-        .child(this.button(t, "hb-login", "Sign in & open tab", true, (_e, cx) => this.openTab(true, cx)))
-        .child(div().text_color(t.muted).child("3. Finish signing in and quit Chrome for Testing; the tab then connects."))
-        .child(div().text_color(t.muted).child("Already signed in?"))
-        .child(this.button(t, "hb-open-tab", "Open in tab", false, (_e, cx) => this.openTab(false, cx))))
-      .child(this.commandHelp(t))
-      )
-      .when(this.section === "settings", (el) => el.child(v_flex().gap(8)
-        .child(div().font_semibold().child("Chrome settings"))
-        .child(div().text_color(t.muted).child(`Selected profile: ${this.profile || "Default"}. Change it on the Browser page.`))
-        .child(this.button(t, "hb-install", "Install Chrome for Testing", false, (_e, cx) => this.tab(cx)))
-        .child(div().text_color(t.muted).child("Closing a browser tab exits the view, not Chrome. Stop shuts down Chrome for the selected profile."))
-        .child(this.button(t, "hb-stop", "Stop Chrome for this profile", false, (_e, cx) => this.stopChrome(cx)))))
-      .when(this.busy, (el) => el.child(div().text_color(t.muted).child("Working…")))
-      .when(Boolean(this.error), (el) => el.child(div().text_color(t.blocked).child(this.error)))
-      .when(Boolean(this.message) && !this.error, (el) => el.child(div().text_color(t.muted).child(this.message)));
+      .children(navItems.map(([section, label]) => {
+        const id = `hb-nav-${section}`;
+        const action = (_e, cx) => { this.selection = id; this.section = section; cx.notify(); };
+        controls.push({ id, action });
+        return this.row(t, id, label, action).when(this.section === section, (el) => el.font_semibold().when(this.selection !== id, (row) => row.bg(t.raised)));
+      }));
+    if (spaces().find((s) => s.active)?.machine !== null) bodyChildren.push(div().text_color(t.blocked).child("Switch to a local space to use Browser."));
+    if (this.section === "browser") {
+      bodyChildren.push(div().font_semibold().child("1. Choose a site and profile"));
+      bodyChildren.push(div().child("Site address"));
+      const field = (id, state) => Input.new(state).h(30).px(8).items_center().rounded(6).border(1)
+        .border_color(this.selection === id ? t.accent : t.input).bg(this.selection === id ? t.raised : t.background).text_color(t.foreground);
+      add("hb-url", () => this.urlInput.focus(), field("hb-url", this.urlInput));
+      bodyChildren.push(div().child("Profile"));
+      add("hb-profile-input", () => this.profileInput.focus(), field("hb-profile-input", this.profileInput));
+      bodyChildren.push(div().text_color(t.muted).child("Named profiles keep separate sessions; everyday Chrome logins are not imported."));
+      bodyChildren.push(div().text_color(t.muted).child(this.loading ? "Loading profiles…" : "Saved profiles:"));
+      const profileBodyIndex = bodyChildren.length;
+      const defaultAction = (_e, cx) => this.chooseProfile("", cx);
+      controls.push({ id: "hb-default", action: defaultAction, bodyIndex: profileBodyIndex });
+      const chips = this.profiles.map((p, index) => {
+        const id = `hb-profile-${p}`;
+        const action = (_e, cx) => this.chooseProfile(p, cx);
+        controls.push({ id, action, bodyIndex: profileBodyIndex, profileIndex: index });
+        return this.profileChip(t, id, this.profile === p ? `✓ ${p}` : p, this.profile === p, action);
+      });
+      bodyChildren.push(h_flex().gap(4)
+        .child(this.profileChip(t, "hb-default", this.profile === "" ? "✓ Default" : "Default", this.profile === "", defaultAction))
+        .child(h_flex().id("hb-profiles").flex_1().overflow_x_scroll().track_scroll(this.profileScroll).gap(4).children(chips)));
+      bodyChildren.push(div().font_semibold().child("2. Start the browser"));
+      const login = (_e, cx) => this.openTab(true, cx);
+      add("hb-login", login, this.button(t, "hb-login", "Sign in & open tab", true, login));
+      bodyChildren.push(div().text_color(t.muted).child("3. Finish signing in and quit Chrome for Testing; the tab then connects."));
+      bodyChildren.push(div().text_color(t.muted).child("Already signed in?"));
+      const open = (_e, cx) => this.openTab(false, cx);
+      add("hb-open-tab", open, this.button(t, "hb-open-tab", "Open in tab", false, open));
+      bodyChildren.push(this.commandHelp(t));
+    } else {
+      bodyChildren.push(div().font_semibold().child("Chrome settings"));
+      bodyChildren.push(div().text_color(t.muted).child(`Selected profile: ${this.profile || "Default"}. Change it on the Browser page.`));
+      const install = (_e, cx) => this.tab(cx);
+      add("hb-install", install, this.button(t, "hb-install", "Install Chrome for Testing", false, install));
+      bodyChildren.push(div().text_color(t.muted).child("Closing a browser tab exits the view, not Chrome. Stop shuts down Chrome for the selected profile."));
+      const stop = (_e, cx) => this.stopChrome(cx);
+      add("hb-stop", stop, this.button(t, "hb-stop", "Stop Chrome for this profile", false, stop));
+    }
+    if (this.busy) bodyChildren.push(div().text_color(t.muted).child("Working…"));
+    if (this.error) bodyChildren.push(div().text_color(t.blocked).child(this.error));
+    if (this.message && !this.error) bodyChildren.push(div().text_color(t.muted).child(this.message));
+    const close = () => closeOverlay(props().overlay);
+    controls.push({ id: "hb-dismiss", action: close });
+    const body = v_flex().id(`hb-body-${this.section}`).flex_1().min_w(0).h_full().overflow_y_scrollbar().track_scroll(this.bodyScroll).pr(8).gap(8).children(bodyChildren);
     return v_flex().id("root").track_focus(this.handle).size_full().min_h(0).bg(t.popover).p(18).gap(14).text_size(13).text_color(t.foreground)
+      .on_key_down((e, cx) => {
+        if (!this.handle.is_focused() || e.modifiers.shift || e.modifiers.alt || e.modifiers.control || e.modifiers.platform) return;
+        const index = controls.findIndex((item) => item.id === this.selection);
+        if (e.key === "down" || e.key === "up") {
+          const step = e.key === "down" ? 1 : -1;
+          const next = controls[index < 0 ? (step === 1 ? 0 : controls.length - 1) : (index + step + controls.length) % controls.length];
+          this.selection = next.id;
+          if (next.bodyIndex !== undefined) this.bodyScroll.scroll_to_item(next.bodyIndex);
+          if (next.profileIndex != null) this.profileScroll.scroll_to_item(next.profileIndex);
+        } else if (e.key === "left") this.selection = `hb-nav-${this.section}`;
+        else if (e.key === "enter" && index >= 0) controls[index].action(e, cx);
+        else return;
+        cx.stop_propagation();
+        cx.notify();
+      })
       .child(h_flex().items_center().justify_between()
         .child(div().text_size(18).font_semibold().child("Browser"))
-        .child(this.button(t, "hb-dismiss", "Close", false, () => closeOverlay(props().overlay))))
+        .child(this.button(t, "hb-dismiss", "Close", false, close)))
+      .child(div().text_size(11).text_color(t.muted).child("↑/↓ Navigate · ← Sidebar · Enter select"))
       .child(h_flex().flex_1().min_h(0).gap(16).items_start().child(nav).child(body));
   }
 }

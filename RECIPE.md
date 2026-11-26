@@ -14,6 +14,7 @@ Open a Browser dialog in Herdr Desktop to choose a site and a dedicated Chrome p
 ## How it behaves
 
 1. Open **Browser** from a local space. **Close** dismisses the dialog; the left rail switches pages in place. The site starts at Google. Choose **Default**, click a saved profile, or type a new name. The dialog remembers the selected profile.
+   Use Up/Down to move through menu controls, Left to return to the modal sidebar row for the current section, and Enter to select. Text input keys retain their native behavior.
 2. **Sign in & open tab** starts a manual Chrome for Testing window for the chosen profile and site. Sign in, then quit Chrome for Testing so the native browser tab can connect. **Open in tab** skips manual sign-in. A standalone tab has no agent recipient.
 3. From a uniquely displayed local agent, the Browser page’s default shortcuts are **Cmd–Enter** to open the entered URL beside that agent (show without navigating if empty), **Cmd–Shift–Enter** to show or reuse its view, **Cmd–Option–S** to send selected text, and **Cmd–Option–X** to send a screenshot. Open and show close the dialog after success; sends keep it open and show the helper’s result. Changing focus cannot retarget the action.
 4. In the native view, use the address bar or **Ctrl/Cmd–L** and the toolbar's back, forward and reload controls. The browser's own tab strip is independent of Herdr's. Closing the tab does not stop Chrome. Use **Chrome settings** to stop only the selected profile or open a separate **Install Chrome** tab.
