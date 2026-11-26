@@ -1,1 +1,7 @@
-{ "place": "none", "focusable": true, "title": "Browser", "overlay": { "kind": "dialog", "width": 680, "height": 840 } }
+{
+  "place": "none",
+  "focusable": true,
+  "title": "Browser",
+  "overlay": { "kind": "dialog", "width": 680, "height": 840 },
+  "palette": [{ "title": "Browser", "command": "mod.open", "args": { "name": "herdr-browser" } }]
+}

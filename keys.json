@@ -1,6 +1,6 @@
 {
   "global": {
-    "cmd-alt-b": "mod.open:herdr-browser"
+    "cmd-ctrl-b": "mod.open:herdr-browser"
   },
   "mod:herdr-browser": {
     "cmd-enter": "herdr-browser.open",

@@ -117,8 +117,10 @@ impl Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ViewRecord {
-    pub pane: String,
-    pub terminal: String,
+    #[serde(default)]
+    pub tab: String,
+    #[serde(default)]
+    pub space: String,
 }
 
 /// A target group is keyed by its root target ID. Closing the root migrates

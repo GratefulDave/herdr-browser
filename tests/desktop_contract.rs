@@ -67,24 +67,23 @@ fn blocked_recipient_is_checked_before_page_and_never_sent() {
 }
 
 #[test]
-fn show_reuses_only_owners_split_and_uses_explicit_panes() {
+fn show_reuses_only_owners_native_tab() {
     let f = Fixture::new();
     for args in [&["show"][..], &["show"][..], &["--owner", "t2", "show"][..], &["--owner", "t2", "show"][..]] {
         let out = f.run("normal", args);
         assert!(out.status.success(), "{args:?}: {}", error(&out));
     }
     let calls = f.calls();
-    let splits: Vec<_> = calls.iter().filter(|c| c[0] == "herdr-app" && c[1] == "do" && c[2] == "pane.split").collect();
-    assert_eq!(splits.len(), 2, "{calls:?}");
-    for (call, pane, owner) in [(splits[0], "p1", "t1"), (splits[1], "p2", "t2")] {
+    let tabs: Vec<_> = calls.iter().filter(|c| c[0] == "herdr-app" && c[1] == "do" && c[2] == "tab.new").collect();
+    assert_eq!(tabs.len(), 2, "{calls:?}");
+    for (call, owner) in [(tabs[0], "t1"), (tabs[1], "t2")] {
         let a = call.as_array().unwrap();
-        let pane_i = a.iter().position(|v| v == "--pane").unwrap();
-        assert_eq!(a[pane_i + 1], pane);
-        let argv_i = a.iter().position(|v| v == "--argv").unwrap();
-        let argv: Vec<String> = serde_json::from_str(a[argv_i + 1].as_str().unwrap()).unwrap();
-        assert!(std::path::Path::new(&argv[0]).is_absolute());
-        assert_eq!(&argv[1..], ["--owner", owner, "view"]);
+        let arg = |name: &str| &a[a.iter().position(|v| v == name).unwrap() + 1];
+        assert_eq!(arg("--space"), "space1");
+        assert_eq!(arg("--mod"), "herdr-browser-tab");
+        assert_eq!(serde_json::from_str::<Value>(arg("--props").as_str().unwrap()).unwrap()["owner"], owner);
     }
+    assert_eq!(calls.iter().filter(|c| c[0] == "herdr-app" && c[1] == "do" && c[2] == "tab.select").count(), 2);
     f.assert_no_legacy();
 }
 
@@ -110,7 +109,7 @@ fn profiles_are_ownerless_sorted_and_read_only() {
 }
 
 #[test]
-fn standalone_url_requires_standalone_and_profile_is_preserved_in_owned_view_argv() {
+fn standalone_url_requires_standalone_and_profile_is_preserved_in_owned_view_props() {
     let f = Fixture::new();
     let out = f.run("normal", &["--owner", "t1", "view", "--url", "http://localhost:3000"]);
     assert!(!out.status.success());
@@ -119,11 +118,11 @@ fn standalone_url_requires_standalone_and_profile_is_preserved_in_owned_view_arg
     let out = f.run("normal", &["--owner", "t1", "--profile", "work", "show"]);
     assert!(out.status.success(), "{}", error(&out));
     let calls = f.calls();
-    let split = calls.iter().find(|c| c[0] == "herdr-app" && c[1] == "do" && c[2] == "pane.split").unwrap();
-    let args = split.as_array().unwrap();
-    let i = args.iter().position(|v| v == "--argv").unwrap();
-    let argv: Vec<String> = serde_json::from_str(args[i + 1].as_str().unwrap()).unwrap();
-    assert_eq!(&argv[1..], ["--owner", "t1", "--profile", "work", "view"]);
+    let tab = calls.iter().find(|c| c[0] == "herdr-app" && c[1] == "do" && c[2] == "tab.new").unwrap();
+    let args = tab.as_array().unwrap();
+    let i = args.iter().position(|v| v == "--props").unwrap();
+    let props: Value = serde_json::from_str(args[i + 1].as_str().unwrap()).unwrap();
+    assert_eq!(props, serde_json::json!({"owner":"t1","profile":"work"}));
     f.assert_no_legacy();
 }
 
@@ -225,15 +224,18 @@ if name == 'herdr-app':
         if scenario == 'down': fail('desktop unavailable')
         terminals = [{'terminal':'t1','pane':'p1'},{'terminal':'t2','pane':'p2'}]
         if scenario == 'ambiguous': terminals.append({'terminal':'t2','pane':'duplicate'})
-        terminals += [{'terminal':k,'pane':v['pane']} for k,v in records().items()]
-        print(json.dumps({'spaces':[{'machine':None,'tabs':[{'id':'tab1','terminals':terminals}]}]})); sys.exit()
-    if args[:2] == ['do','pane.split']:
-        pane = args[args.index('--pane')+1]
-        argv = json.loads(args[args.index('--argv')+1])
-        view = 't9' if pane == 'p1' else 'tb'
-        viewpane = 'p9' if pane == 'p1' else 'pb'
-        views = records(); views[view] = {'pane':viewpane,'argv':argv}
+        print(json.dumps({'spaces':[{'id':'space1','machine':None,'tabs':[{'id':'tab1','terminals':terminals}]}]})); sys.exit()
+    if args[:2] == ['do','tab.new']:
+        props = json.loads(args[args.index('--props')+1])
+        view = 'view-' + props['owner']
+        views = records(); views[view] = {'props':props}
         (root / 'views.json').write_text(json.dumps(views))
-        print(json.dumps({'terminal':view,'pane':viewpane})); sys.exit()
+        print(json.dumps({'tab':view})); sys.exit()
+    if args[:2] == ['do','tab.select']:
+        (root / 'selected').write_text(args[args.index('--id')+1])
+        if args[args.index('--id')+1] not in records(): fail('tab not found')
+        print('{}'); sys.exit()
+    if args == ['status']:
+        print(json.dumps({'tab':(root / 'selected').read_text(), 'space':'space1'})); sys.exit()
     fail('unexpected desktop command')
 "##;
