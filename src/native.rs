@@ -193,8 +193,13 @@ fn session(page: &mut page::Page, out: &Arc<Mutex<TcpStream>>, rx: mpsc::Receive
     let mut generation = 0;
     let mut target = String::new();
     let mut refresh = Instant::now();
+    let mut keepalive = Instant::now() + Duration::from_secs(10);
     let mut last_page = Value::Null;
     loop {
+        if keepalive <= Instant::now() {
+            out.lock().map_err(|_| "socket lock poisoned")?.write_all(b"{\"t\":\"keepalive\"}\n")?;
+            keepalive = Instant::now() + Duration::from_secs(10);
+        }
         if refresh <= Instant::now() {
             let tabs = page::tabs(page)?;
             let restart = target != page.tab.id || stream.is_none();

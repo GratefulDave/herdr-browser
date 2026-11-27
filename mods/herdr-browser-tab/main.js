@@ -120,12 +120,14 @@ export default class BrowserTab extends View {
           line.set(tail, pos);
         }
         const msg = JSON.parse(utf8(line));
-        if (msg.t === "frame") {
-          this.frames = this.frames.filter((frame) => frame.file !== msg.file);
-          this.frames.push(msg);
-          if (this.frames.length > 4) this.frames.shift();
-        } else this.message(msg, cx);
-        changed = true;
+        if (msg.t !== "keepalive") {
+          if (msg.t === "frame") {
+            this.frames = this.frames.filter((frame) => frame.file !== msg.file);
+            this.frames.push(msg);
+            if (this.frames.length > 4) this.frames.shift();
+          } else this.message(msg, cx);
+          changed = true;
+        }
         parts = []; length = 0; start = i + 1;
       }
       if (start < chunk.length) {
